@@ -7,4 +7,4 @@ This repository contains the script used for the data analysis presented in the 
 # Contents
 
 * README.md: This file, containing information about the repository.    
-* full_script.R: Script for the data analysis and visualisation for the carbon sequestration rates and stocks.         
+* r_code: Script for the data analysis and visualisation for the carbon sequestration rates and stocks.         
