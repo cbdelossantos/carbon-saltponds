@@ -1,0 +1,769 @@
+# version 20241105
+
+#### METADATA ####
+# Project: BLUE CARBON Salina NECTON (Saray's MSc thesis)
+# Created by: Carmen
+# Created on: 21st June 2021
+# Last modification:
+# 6th July 2021
+# 15th July 2021
+# 23rd August 2021
+# 18th October 2021
+# 31th October 2022
+# 5th January 2023
+# 17th April 2023
+# 24th July 2023
+# 1st August 2023
+# 19th October 2023
+# 5th November 2024
+
+#### SETTINGS ####
+
+# clean everything
+rm(list=ls())
+
+# wordir
+setwd("~/Library/CloudStorage/OneDrive-UniversidadedoAlgarve/Trabajo-OneDrive/publications/submitted/2025_alexandre/wordir")
+
+
+# libraries
+packages <- c("plyr",           # for ddply
+              "dplyr",          # Data wrangling
+              "tidyr",          # Data wrangling
+              "tidyverse",      # for data wrangling
+              "readxl",         # for reading xlsx files
+              "gridExtra",      # for arranging plots
+              "reshape2",       # for shaping data
+              "MESS",           # for AUC calculation
+              "purrr",          # functional programing tools 
+              "agricolae",      # for kruskal and lettering in Dunn tests
+              "jtools",         # for weighthed standard deviation
+              "FSA")            # for dunn test
+
+for (i in seq_along(packages)) {
+  if(!do.call(require, list(package = packages[i]))) {
+    do.call(install.packages, list(pkgs = packages[i]))
+    do.call(require, list(package = packages[i]))
+  }
+}
+
+# clean
+rm(packages,i)
+
+# visualization tools
+cols_dark  <- c("darkblue","darkred","darkgreen")
+cols_light <- c("#1f78b4","#e35153","#33a02c")
+
+#### DATA ####
+
+# load
+data.cor  <- read_excel("./data/sediment/clean/data_sediment_20231019.xlsx",sheet="cores",na="NA",skip=3)
+data.dep  <- read_excel("./data/sediment/clean/data_sediment_20231019.xlsx",sheet="depthseries",na="NA",skip=3)
+data.rat  <- read_excel("./data/sediment/clean/data_sediment_20231019.xlsx",sheet="rates",na="NA",skip=3)
+
+# add core info to data.dep
+data.dep  <- merge(data.dep,
+                   data.cor[,c("core_id","tank_code","date","latitude","longitude")],
+                   by=c("core_id","tank_code"))
+
+# select
+names(data.dep)
+data.dep <- data.dep[,c("date","latitude","longitude",
+                        "selected_carbon",
+                        "core_id","tank_code","replicate",
+                        "sample_id","depth_min","depth_max","depth_middle","weight_6",
+                        "percentage_salt","dry_bulk_density",
+                        "om_group","percentage_organic_matter",
+                        "percentage_organic_carbon_ccmar","percentage_organic_carbon_ucd",
+                        "delta_carbon_total_ucd")]
+
+# rename tank codes
+data.dep$tank_code <- as.factor(data.dep$tank_code)
+levels(data.dep$tank_code) <- c("C1","C2","C3")
+
+#### --------------------------------------- GENERAL INFO CORES --------------------------------------- ####
+#### DEPTH AND COMPACTION #### 
+
+# penetration depth (cm)
+round(summary(data.cor$core_depth),1)
+
+# compaction (%)
+round(summary(data.cor$compaction_factor),1)
+
+#### SAMPLES ####
+
+# weight of sub-samples for LOI analysis
+round(summary(data.dep$weight_6),1)
+
+# number of samples with OM determined
+n1 <- nrow(data.dep[is.na(data.dep$percentage_organic_matter)==F,c("sample_id","percentage_organic_matter")])
+n1
+
+# number of samples with OC determined at CCMAR
+n2 <- nrow(data.dep[is.na(data.dep$percentage_organic_carbon_ccmar)==F,c("sample_id","percentage_organic_carbon_ccmar")])
+n2
+
+# number of samples with OC determined at CCMAR per tank
+n3 <- data.dep[is.na(data.dep$percentage_organic_carbon_ccmar)==F,c("sample_id","tank_code","percentage_organic_carbon_ccmar")]
+table(n3$tank_code)
+
+# percentage of samples analysed for OC
+round(100*n2/n1,1)
+
+# clean
+data.dep$weight_6 <- NULL
+rm(n1,n2,n3)
+
+#### PROFILE DBD AND OM ####
+
+# profiles grouped by type of tank
+ggplot(data.dep,aes(x=depth_max,y=dry_bulk_density,colour=core_id)) +
+  geom_point(size=0.8,shape=21) +
+  geom_line() +
+  coord_flip() +
+  scale_x_reverse("Depth (cm)") +
+  facet_wrap(~tank_code) +
+  scale_y_continuous("Dry bulk density (g dw cm-3)") +
+  scale_colour_manual("Core",values=c(rep("grey40",9)),guide="none") +
+  theme_bw()
+
+ggplot(data.dep,aes(x=depth_max,y=percentage_organic_matter,colour=core_id)) +
+  geom_point(size=0.8,shape=21) +
+  geom_line() +
+  coord_flip() +
+  scale_x_reverse("Depth (cm)") +
+  facet_wrap(~tank_code) +
+  scale_y_continuous("Organic matter content (% dw)") +
+  scale_colour_manual("Core",values=c(rep("grey40",9)),guide="none") +
+  theme_bw()
+
+# all profiles together
+ggplot(data.dep,aes(x=depth_max,y=percentage_organic_matter,colour=tank_code,shape=core_id)) +
+  geom_point() +
+  geom_line() +
+  coord_flip() +
+  scale_x_reverse("Depth (cm)") +
+  scale_y_continuous("Organic matter content (% dw)") +
+  scale_shape_manual("Core",values=c(1:9)) +
+  scale_colour_manual("",values=cols_light) +
+  theme_bw()
+
+ggplot(data.dep,aes(x=depth_max,y=dry_bulk_density,colour=tank_code,shape=core_id)) +
+  geom_point() +
+  geom_line() +
+  coord_flip() +
+  scale_x_reverse("Depth (cm)") +
+  scale_y_continuous("Dry bulk density (g dw cm-3)") +
+  scale_shape_manual("Core",values=c(1:9)) +
+  scale_colour_manual("",values=cols_light) +
+  theme_bw()
+
+#### CORRELATION DBD AND OM ####
+
+# DBD and OM
+ggplot(data.dep,aes(x=dry_bulk_density,y=percentage_organic_matter,colour=tank_code,shape=tank_code)) +
+  geom_point() +
+  scale_colour_manual("",values=cols_light) +
+  scale_shape_manual("",values=c(21,22,23)) +
+  scale_x_continuous("Dry bulk density (g dw cm-3)") +
+  scale_y_continuous("Organic matter content (%)") +
+  theme_bw()
+
+#### --------------------------------------- OC CONTENT --------------------------------------- ####
+#### SELECTION OF SAMPLES FOR CARBON ANALYSIS (TABLE - batch 1) ####
+
+# this was the first selection of samples for determination of OC
+
+# 8 intervals of OM (2.5 range)
+ggplot(data.dep,aes(x=percentage_organic_matter)) +
+  geom_histogram(binwidth=2.5,fill="grey",colour="black") + 
+  scale_x_continuous("Organic matter (% dw) intervals") +
+  scale_y_continuous("Number of samples") +
+  theme_bw()
+
+# define interval of OM
+data.dep$om_interval <- cut(data.dep$percentage_organic_matter,breaks=seq(0,20,2.5))
+table(data.dep$om_interval)
+
+# set seed
+set.seed(2)
+
+# random sample
+sample <- data.dep %>%
+  group_by(om_interval) %>%
+  sample_n(size=2)
+sample
+
+# plot samples' values
+ggplot(sample,aes(x=percentage_organic_matter)) +
+  geom_histogram(fill="grey",colour="black",breaks=seq(0,20,2.5)) + 
+  theme_bw()
+
+# check samples
+table(sample$core_id)
+table(sample$tank_code)
+
+# save list of samples
+write_csv(sample,"./data/sediment/clean/rdata/selected_samples.csv")
+
+# clean
+rm(sample)
+
+#### SELECTION OF SAMPLES FOR CARBON ANALYSIS (VISUAL - batch 1 + 2) - FIGURE S3 ####
+
+# this section includes first and second batches of samples where OC was determined
+# the second selection was manually done on the excel file
+
+# table
+table(data.dep$tank_code,data.dep$selected_carbon)
+
+# plot
+fig_s3 <- ggplot(data.dep,aes(x=depth_max,y=percentage_organic_matter)) +
+  geom_hline(yintercept=12.5,linetype=2,colour="blue") +
+  geom_line() +
+  geom_point(shape=21,fill="white") +
+  geom_point(data=data.dep[data.dep$selected_carbon=="carbon_measured",],colour="red") +
+  coord_flip() +
+  scale_x_reverse("Sediment depth (cm)") +
+  facet_grid(factor(replicate)~factor(tank_code)) +
+  scale_y_continuous("Organic matter content (% dw)") +
+  theme_bw()
+fig_s3
+
+# annotate core id
+ann_text <- unique(data.dep[,c("core_id","tank_code","replicate")])
+ann_text$tank_code <- as.factor(ann_text$tank_code)
+ann_text$replicate <- as.factor(ann_text$replicate)
+ann_text$depth_max <- 40
+ann_text$percentage_organic_matter <- 17
+ann_text
+
+fig_s3 <- fig_s3 +
+  geom_text(aes(label=core_id),data=ann_text,size=3.5)
+fig_s3
+
+# colors to used in strips
+fill_colors <- cols_light
+
+# find strips glob
+fig_s3      <- ggplot_gtable(ggplot_build(fig_s3))
+strips <- which(startsWith(fig_s3$layout$name,'strip'))
+
+# change the fill color of each strip
+for (s in seq_along(strips)) {
+  fig_s3$grobs[[strips[s]]]$grobs[[1]]$children[[1]]$gp$fill <- fill_colors[s]
+}
+
+# plot again
+plot(fig_s3)
+
+# save
+pdf(file="./figures/figure_S3.pdf",width=6,height=6,paper="a4")
+grid.arrange(fig_s3,top="",ncol=1)
+dev.off()
+
+# clean
+rm(fig_s3,ann_text,s,strips,fill_colors)
+
+#### ANALYSIS CCMAR and UC DAVIS ####
+
+# comparison ccmar and ucd analysis
+pdata <- data.dep[is.na(data.dep$percentage_organic_carbon_ucd)==F,]
+ggplot(pdata,aes(x=percentage_organic_carbon_ccmar,y=percentage_organic_carbon_ucd)) +
+  geom_point(shape=21,fill="grey") +
+  geom_abline(slope=1,intercept=0,linetype=3,colour="grey30") +
+  scale_x_continuous("Organic carbon content (% dw) - CCMAR") +
+  scale_y_continuous("Organic carbon content (% dw) - UC-DAVIS") +
+  theme(legend.position="top") +
+  theme_bw()
+
+# explore delta-13c
+ggplot(pdata,aes(x=percentage_organic_carbon_ucd,y=delta_carbon_total_ucd,colour=tank_code,fill=tank_code)) +
+  geom_point(shape=21) +
+  scale_x_continuous("Organic carbon content (% dw)") +
+  scale_y_continuous("Delta C-13 (per mille)") +
+  scale_colour_manual("Site",values=cols_dark) +
+  scale_fill_manual("Site",values=cols_light) +
+  theme(legend.position="top") +
+  theme_bw()
+
+# clean
+rm(pdata)
+
+#### OC-OM REGRESSION (ALL) - FIGURE S4 ####
+
+# histogram OM per tank type
+ggplot(data.dep,aes(x=percentage_organic_matter,fill=tank_code)) +
+  geom_histogram(bins=20,colour="black") +
+  geom_vline(xintercept=12.5,linetype=2,colour="grey20") +
+  scale_x_continuous("Organic matter content (% dw)") +
+  scale_y_continuous("Number of observations") +
+  scale_fill_manual("",values=cols_light) +
+  facet_grid(.~tank_code) +
+  theme_bw() +
+  theme(legend.position="none")
+
+# select data (all samples with values of organic carbon - measured at ccmar)
+pdata <- data.dep[is.na(data.dep$percentage_organic_carbon_ccmar)==F,]
+
+# correlation OC-OM (all)
+fig_s4 <- ggplot(pdata,aes(x=percentage_organic_matter,y=percentage_organic_carbon_ccmar)) +
+  geom_point(aes(colour=tank_code,fill=tank_code,shape=tank_code)) +
+  geom_vline(xintercept=12.5,linetype=2,colour="darkorange") +
+  scale_colour_manual("",values=cols_dark) +
+  scale_fill_manual("",values=cols_light) +
+  scale_shape_manual("",values=c(21:23)) +
+  annotate("text",x=16.8,y=3,label=("Organic matter values"),size=2.8,colour="darkorange") +
+  annotate("text",x=16.8,y=2.8,label=("'' >= 12.5 ~ '% dw were excluded'"),size=2.8,parse=TRUE,colour="darkorange") +
+  annotate("text",x=16.8,y=2.6,label=("'from linear model'"),size=2.8,parse=TRUE,colour="darkorange") +
+  scale_x_continuous("Organic matter content (% dw)") +
+  scale_y_continuous("Organic carbon content (% dw)") +
+  theme_bw() +
+  theme(legend.position="top")
+fig_s4
+
+#### OC-OM REGRESSION (SELECTION) - FIGURE S4 ####
+
+# select data (all samples with valid organic matter values, i.e., < 12.5)
+pdata <- pdata[pdata$om_group=="valid",]
+
+# correlation OC-OM
+ggplot(pdata,aes(x=percentage_organic_matter,y=percentage_organic_carbon_ccmar)) +
+  geom_smooth(formula=y~x,method="lm",linetype=2,colour="grey20",fill="grey80") +
+  geom_point(aes(colour=tank_code,fill=tank_code),shape=21) +
+  scale_colour_manual("",values=cols_dark) +
+  scale_fill_manual("",values=cols_light) +
+  scale_x_continuous("Organic matter content (% dw)") +
+  scale_y_continuous("Organic carbon content (% dw)") +
+  theme_bw() +
+  theme(legend.position="top")
+
+# regression analysis OC-OM (only when OM < 12.5 % dw)
+mdata <- data.dep[is.na(data.dep$percentage_organic_carbon_ccmar)==F & data.dep$om_group=="valid",]
+mod <- lm(percentage_organic_carbon_ccmar~percentage_organic_matter,mdata)
+summary(mod) # intercept & slope significant
+
+# text for figure with model results
+mod.text <- paste0("OC (% dw) = ",
+                   round(mod$coefficients[[1]],3)," + ",
+                   round(mod$coefficients[[2]],3)," OM (% dw)",
+                   "\n R squared = ",round(summary(mod)$r.squared,3),
+                   " (n = ",nrow(pdata),")")
+
+# add regression line to figure S4
+fig_s4 <- fig_s4 +
+  geom_smooth(data=subset(pdata,percentage_organic_matter<=12.5),
+              formula=y~x,method="lm",linetype=3,linewidth=0.5,colour="grey20",fill="grey80",level=0.99) +
+  annotate("text",x=6.5,y=3.5,label=mod.text,size=2.5)
+fig_s4
+
+# save
+pdf(file="./figures/figure_S4.pdf",width=4,height=4,paper="a4")
+grid.arrange(fig_s4,top="",ncol=1)
+dev.off()
+
+# clean
+rm(fig_s4,pdata,mdata,mod.text)
+
+#### OC ESTIMATION FROM OM ####
+
+# obtain OC estimations for cores from pond #1 and #2 (there are no OM values > 12.5 in samples from those cores)
+# the few values of OC measurements in cores from ponds #1 and #2 are not used for the final column of OC content
+
+data.dep$percentage_organic_carbon <- ifelse(data.dep$tank_code=="pond #3",
+                                             data.dep$percentage_organic_carbon_ccmar,
+                                             as.numeric(mod$coefficients[[1]]+mod$coefficients[[2]]*data.dep$percentage_organic_matter))
+
+# avoid negative values
+table(data.dep$percentage_organic_carbon<0)
+data.dep$percentage_organic_carbon <- ifelse(data.dep$percentage_organic_carbon<0,0,data.dep$percentage_organic_carbon)
+table(data.dep$percentage_organic_carbon<0)
+table(is.na(data.dep$percentage_organic_carbon))
+
+# clean
+rm(mod)
+
+#### OC VISUALISATION - FIGURE 5 ####
+
+# analysis of the profile of OC content for measured and estimated data
+pdata <- data.dep[is.na(data.dep$percentage_organic_carbon)==F,]
+
+ggplot() +
+  # plot direct OC measurements (red)
+  geom_point(data=pdata[is.na(pdata$percentage_organic_carbon_ccmar)==F,],
+             aes(x=depth_max,y=percentage_organic_carbon_ccmar,shape=core_id),colour="red") +
+  # plot estimated OC measurements (blue)
+  geom_point(data=pdata[pdata$tank_code!="pond #3",],
+             aes(x=depth_max,y=percentage_organic_carbon,shape=core_id),colour="blue") +
+  # visualisation options
+  coord_flip() +
+  scale_x_reverse("Depth (cm)") +
+  facet_grid(replicate~tank_code) +
+  scale_y_continuous("Organic carbon content (% dw)") +
+  scale_shape_manual("Core",values=c(rep(21,9)),guide="none") +
+  theme_bw()
+
+# final profile
+# exclude NA data
+pdata <- data.dep[is.na(data.dep$percentage_organic_carbon)==F,]
+
+# plot
+fig_5 <- ggplot(pdata,aes(x=depth_max,y=percentage_organic_carbon,shape=core_id)) +
+  geom_line() +
+  geom_point(fill="white") +
+  geom_vline(xintercept=30,linetype=2,colour="blue") +
+  coord_flip() +
+  scale_x_reverse("Sediment depth (cm)") +
+  facet_wrap(~tank_code) +
+  scale_y_continuous("Organic carbon content (% dw)") +
+  scale_shape_manual("Core code",values=c(9,21,22,4,8,25,3,23,24)) +
+  theme_bw()
+fig_5
+
+# colors to used in strips
+# fill_colors <- cols_light
+
+# find strips glob
+# fig_5  <- ggplot_gtable(ggplot_build(fig_5))
+# strips <- which(startsWith(fig_5$layout$name,'strip'))
+
+# change the fill color of each strip
+# for (s in seq_along(strips)) {
+  # fig_5$grobs[[strips[s]]]$grobs[[1]]$children[[1]]$gp$fill <- fill_colors[s]
+# }
+
+# plot again
+plot(fig_5)
+
+# save
+pdf(file="./figures/figure_5.pdf",width=6,height=4,paper="a4")
+grid.arrange(fig_5,top="",ncol=1)
+dev.off()
+
+# clean
+rm(pdata,fig_5,s,strips,fill_colors)
+
+#### OC STATS - TABLE 3 ####
+
+# select data for the top 30 cm
+sdata <- data.dep[data.dep$depth_max<=30,
+                  c("core_id","tank_code","depth_min","depth_max","percentage_organic_carbon")]
+
+# exclude NAs
+sdata <- sdata[is.na(sdata$percentage_organic_carbon)==F,]
+SDATA <- data.frame()
+
+# calculate layer thickness that represents each organic carbon measurement
+n.core  <- unique(sdata$core_id)
+for(i in 1:length(n.core)){
+  data <- sdata[sdata$core_id==n.core[i],]
+  for(j in 1:nrow(data)){
+    if(j<nrow(data)){
+      data$thickness[j] <- data$depth_min[j+1]-data$depth_min[j]
+    }else{
+      data$thickness[j] <- data$depth_max[j]-data$depth_min[j]
+    }
+  }
+  SDATA <- rbind(SDATA,data)
+}
+sdata <- SDATA
+
+# descriptive table per pond
+table <- ddply(sdata,.(tank_code),summarise,
+               mean = mean(percentage_organic_carbon,na.rm=T),
+               sd = sd(percentage_organic_carbon,na.rm=T),
+               se = sd(percentage_organic_carbon,na.rm=T)/sqrt(length(percentage_organic_carbon)),
+               weighted.mean=weighted.mean(percentage_organic_carbon,thickness),
+               weighted.sd=wtd.sd(percentage_organic_carbon,thickness),
+               weighted.se=wtd.sd(percentage_organic_carbon,thickness)/sqrt(length(percentage_organic_carbon)),
+               median = median(percentage_organic_carbon),
+               mad = mad(percentage_organic_carbon,center=median(percentage_organic_carbon),constant=1.4826), # median absolute deviation
+               min = min(percentage_organic_carbon),
+               max = max(percentage_organic_carbon),
+               quantile_1 = quantile(percentage_organic_carbon,probs=0.25),
+               quantile_3 = quantile(percentage_organic_carbon,probs=0.75),
+               n = length(percentage_organic_carbon))
+table
+
+# stats - difference among ponds
+hist(sdata$percentage_organic_carbon)
+shapiro.test(sdata$percentage_organic_carbon) # NO normality
+fligner.test(percentage_organic_carbon~tank_code,sdata) # NO homocedasticity
+kruskal(sdata$percentage_organic_carbon,sdata$tank_code,group=TRUE,p.adj="bonferroni")$statistics
+kruskal(sdata$percentage_organic_carbon,sdata$tank_code,group=TRUE,p.adj="bonferroni")$means
+kruskal(sdata$percentage_organic_carbon,sdata$tank_code,group=TRUE,p.adj="bonferroni")$groups
+dunnTest(sdata$percentage_organic_carbon,sdata$tank_code,method="bonferroni")
+
+# clean
+rm(sdata,data,table,SDATA,i,j,n.core)
+
+#### --------------------------------------- OC STOCKS --------------------------------------- ####
+#### STOCK CALCULATION ####
+
+# Data: You must have a data.frame with 3 columns:
+## core_id: each core must have a unique identifier
+## depth_corr: middle depth of the sample, after correcting for compaction
+## oc_concentration: carbon concentration in g cm3 (oc fraction * dry bulk density)
+## Assumptions:
+## dry bulk density values have been corrected to account for compaction!
+## there are NO missing values in any of the columns
+
+# calculate organic carbon density (g OC cm-3)
+data.dep$oc_concentration <- with(data.dep,dry_bulk_density*percentage_organic_carbon/100)
+data <- data.dep[,c("core_id","depth_middle","oc_concentration")]
+
+# Stock estimation parameters - change according to your use-case
+## Start of stock (cm)
+min_depth <- 0
+
+## End of stock (cm)
+max_depth <- 30
+
+## How to extrapolate if your data does not reach the end of stock
+## 1 - stops stock calculation at last recorded depth
+## 2 - takes last recorded value and extends it to the end
+extrapolation_rule <- 2 
+
+
+# Carbon stocks. If depths are in cm and concentrations in g OC cm3, results will
+# be in g OC cm2
+data.sto <- data %>%
+  # group by core 
+  dplyr::group_by(core_id) %>%
+  # separate the data of each core
+  tidyr::nest() %>%
+  # map
+  dplyr::mutate(
+    oc_stock = purrr::map_dbl(
+      data,
+      function(df) {
+        MESS::auc(
+          x = df$depth_middle,
+          y = df$oc_concentration,
+          from = min_depth,
+          to = max_depth,
+          type = "linear",
+          rule = extrapolation_rule
+        )
+      }
+    )
+  )
+
+data.sto # g OC cm2
+data.sto$oc_stock <- data.sto$oc_stock*100 # Mg OC ha-1
+data.sto$data <- NULL
+data.sto
+
+# add info
+data.inf  <- unique(data.dep[,c("core_id","tank_code")])
+data.sto  <- merge(data.sto,data.inf,by=c("core_id"))
+data.sto
+
+# clean
+rm(data.inf,extrapolation_rule,data,max_depth,min_depth)
+
+#### STOCK VISUALISATION ####
+
+# bar per core
+ggplot(data.sto,aes(x=tank_code,y=oc_stock,fill=core_id)) +
+  geom_col(position=position_dodge(),colour="black") +
+  scale_x_discrete("") +
+  scale_y_continuous("OC stock at 30 cm (Mg OC ha-1)") +
+  scale_fill_manual("",values=c("red","green","green","red","green","red","blue","blue","blue"),guide="none") +
+  theme_bw() +
+  theme(legend.position="none")
+
+# box plot per pond
+ggplot(data.sto,aes(x=tank_code,y=oc_stock,fill=tank_code)) +
+  geom_boxplot() +
+  scale_x_discrete("") + 
+  scale_y_continuous(bquote(OC~stock~(Mg~OC~ha^-1)),limits=c(0,45)) +
+  scale_fill_manual("",values=cols_light) +
+  theme_bw() +
+  theme(legend.position = "none")
+
+#### STOCK STATS - TABLE 3 ####
+
+# descriptive stats by pond
+table <- ddply(data.sto,.(tank_code),summarise,
+               mean = mean(oc_stock,na.rm=T),
+               sd = sd(oc_stock,na.rm=T),
+               se = sd(oc_stock,na.rm=T)/sqrt(length(oc_stock)),
+               median = median(oc_stock),
+               mad = mad(oc_stock,center=median(oc_stock),constant=1.4826), # median absolute deviation
+               min = min(oc_stock),
+               max = max(oc_stock),
+               quantile_1 = quantile(oc_stock,probs=0.25),
+               quantile_3 = quantile(oc_stock,probs=0.75),
+               n = length(oc_stock))
+table
+
+# descriptive stats all ponds together
+table <- ddply(data.sto,.(),summarise,
+               mean = mean(oc_stock,na.rm=T),
+               sd = sd(oc_stock,na.rm=T),
+               se = sd(oc_stock,na.rm=T)/sqrt(length(oc_stock)),
+               median = median(oc_stock),
+               mad = mad(oc_stock,center=median(oc_stock),constant=1.4826), # median absolute deviation
+               min = min(oc_stock),
+               max = max(oc_stock),
+               quantile_1 = quantile(oc_stock,probs=0.25),
+               quantile_3 = quantile(oc_stock,probs=0.75),
+               n = length(oc_stock))
+table
+
+# difference stats
+hist(data.sto$oc_stock) # histogram
+shapiro.test(data.sto$oc_stock) # test normality > 0.5 YES
+fligner.test(data.sto$oc_stock~data.sto$tank_code) # test homocedasticity 0.5 > YES
+mod <- aov(oc_stock~tank_code,data.sto)
+summary(mod)
+TukeyHSD(mod)
+
+# calculate stock in whole area
+area <- 6 # in ha
+mean_stock <- table$mean # in Mg OC ha-1
+total_stock <- area*mean_stock # in Mg OC
+total_stock
+
+# clean
+rm(area,mean_stock,total_stock,mod,table)
+
+#### --------------------------------------- OC RATES --------------------------------------- ####
+#### RATE CALCULATION ####
+
+# calculate sediment accumulation rate (mm yr-1) from om-rich layer depth and pond age
+data.rat$sar <- 10*data.rat$om_layer/data.rat$age 
+
+# prepare data to obtain mean organic carbon density for each core, at the depth of 49 years
+data.den <- data.dep[,c("tank_code","core_id","depth_min","depth_max","oc_concentration")]
+data.den <- merge(data.den,data.rat[,c("core_id","depth49")],by="core_id")
+data.den$select <- ifelse(data.den$depth_max<=data.den$depth49,"yes","no")
+data.den <- data.den[is.na(data.den$oc_concentration)==F & data.den$select=="yes",]
+
+# calculate weighted mean of organic carbon density considering the layer thickness that represents each measurement
+n.core <- unique(data.den$core_id)
+TABLE.DEN <- data.frame()
+DATA.DEN  <- data.frame()
+
+for(i in 1:length(n.core)){
+  data <- data.den[data.den$core_id==n.core[i],]
+  for(j in 1:nrow(data)){
+    if(j<nrow(data)){
+      data$thickness[j] <- data$depth_min[j+1]-data$depth_min[j]
+      }else{
+        data$thickness[j] <- data$depth_max[j]-data$depth_min[j]
+      }
+    }
+  table <- data.frame(core_id=n.core[i],
+                      n=length(data$oc_concentration),
+                      oc_conc_mean=weighted.mean(data$oc_concentration,data$thickness),
+                      oc_conc_sd=wtd.sd(data$oc_concentration,data$thickness))
+  table$oc_conc_se <- table$oc_conc_sd/sqrt(table$n)
+  TABLE.DEN <- rbind(TABLE.DEN,table)
+  DATA.DEN  <- rbind(DATA.DEN,data)
+}
+data.den  <- DATA.DEN
+table.den <- TABLE.DEN
+
+# add averages to data.rat
+data.rat <- merge(data.rat,table.den)
+
+# calculate organic carbon burial rates
+data.rat$oc_burial <- 10^3*data.rat$sar*data.rat$oc_conc_mean
+
+# view
+data.rat
+
+# clean
+rm(data,table,i,j,n.core,DATA.DEN,TABLE.DEN,table.den)
+
+#### RATE VISUALISATION ####
+
+# bar per core
+ggplot(data.rat,aes(x=tank_code,y=oc_burial,fill=core_id)) +
+  geom_col(position=position_dodge(),colour="black") +
+  scale_x_discrete("") +
+  scale_y_continuous("OC burial rate (g OC m-2 yr-1)") +
+  scale_fill_manual("",values=c("red","green","green","red","green","red","blue","blue","blue"),guide="none") +
+  theme_bw() +
+  theme(legend.position="none")
+
+# box plot per pond
+ggplot(data.rat,aes(x=tank_code,y=oc_burial,fill=tank_code)) +
+  geom_boxplot() +
+  scale_x_discrete("") + 
+  scale_y_continuous(bquote(OC~burial~rate~(g~OC~m^-2~yr^-1))) +
+  scale_fill_manual("",values=cols_light) +
+  theme_bw() +
+  theme(legend.position = "none")
+
+#### RATE STATS - TABLE 3 ####
+
+# descriptive stats by pond
+table.pon <- ddply(data.rat,.(tank_code),summarise,
+               
+               # sar
+               mean_sar = mean(sar,na.rm=T),
+               sd_sar = sd(sar,na.rm=T),
+               se_sar = sd(sar,na.rm=T)/sqrt(length(sar)),
+               min_sar = min(sar),
+               max_sar = max(sar),
+               
+               # car
+               mean_car = mean(oc_burial,na.rm=T),
+               sd_car = sd(oc_burial,na.rm=T),
+               se_car = sd(oc_burial,na.rm=T)/sqrt(length(oc_burial)),
+               median_car = median(oc_burial),
+               mad_car = mad(oc_burial,center=median(oc_burial),constant=1.4826), # median absolute deviation
+               min_car = min(oc_burial),
+               max_car = max(oc_burial),
+               quantile_1_car = quantile(oc_burial,probs=0.25),
+               quantile_3_car = quantile(oc_burial,probs=0.75),
+               n = length(oc_burial))
+table.pon
+
+# descriptive stats all ponds together
+table.all <- ddply(data.rat,.(),summarise,
+               mean = mean(oc_burial,na.rm=T),
+               sd = sd(oc_burial,na.rm=T),
+               se = sd(oc_burial,na.rm=T)/sqrt(length(oc_burial)),
+               median = median(oc_burial),
+               mad = mad(oc_burial,center=median(oc_burial),constant=1.4826), # median absolute deviation
+               min = min(oc_burial),
+               max = max(oc_burial),
+               quantile_1 = quantile(oc_burial,probs=0.25),
+               quantile_3 = quantile(oc_burial,probs=0.75),
+               n = length(oc_burial))
+table.all
+
+# difference stats - sar
+hist(data.rat$sar) # histogram
+shapiro.test(data.rat$sar) # test normality > 0.5 YES
+fligner.test(data.rat$sar~data.rat$tank_code) # test homocedasticity 0.5 > YES
+mod <- aov(sar~tank_code,data.rat)
+summary(mod)
+TukeyHSD(mod)
+
+# difference stats - car
+hist(data.rat$oc_burial) # histogram
+shapiro.test(data.rat$oc_burial) # test normality > 0.5 YES
+fligner.test(data.rat$oc_burial~data.rat$tank_code) # test homocedasticity 0.5 > YES
+mod <- aov(oc_burial~tank_code,data.rat)
+summary(mod)
+TukeyHSD(mod)
+
+# calculate burial rate in whole area
+area <- 6 # in ha
+mean_burial <- table.all$mean # in g OC m-2 yr-1
+total_burial <- area*mean_burial/100 # in Mg OC yr-1
+total_burial
+
+# clean
+rm(area,mean_burial,total_burial,mod,table,data.rat)
+
+#### --------------------------------------- THE END --------------------------------------- ####
+R.version
+sessionInfo()
+citation()
+rm(list=ls())
